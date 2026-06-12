@@ -1,5 +1,5 @@
 import { openai } from "@ai-sdk/openai"
-import { generateText } from "ai"
+import { generateImage } from "ai"
 
 export const maxDuration = 300
 
@@ -106,19 +106,11 @@ export async function POST(req: Request) {
       })
       .join("\n")
 
-    const result = await generateText({
-      model: "openai/gpt-5.1-instant",
-      messages: [
-        {
-          role: "user",
-          content: [
-            ...photos.flatMap((photo, index) => [
-              { type: "text" as const, text: `Reference image ${index + 1}: ${ROLE_LABELS[photo.role]}` },
-              { type: "image" as const, image: photo.image },
-            ]),
-            {
-              type: "text",
-              text: `Create one cohesive photorealistic family portrait using all uploaded references.
+    const result = await generateImage({
+      model: openai.image(IMAGE_GENERATION_MODEL),
+      prompt: {
+        images: photos.map((photo) => photo.image),
+        text: `Create one cohesive photorealistic family portrait using all uploaded references.
 
 ${MODE_PROMPTS[mode]}
 
@@ -128,32 +120,16 @@ Per-person instructions:
 ${transformationGuide}
 
 Preserve each person's unique facial features, identity, hairstyle color, skin tone, glasses if any, and expression so each person remains recognizable. Do not omit anyone. Arrange them naturally as a warm family photo with consistent lighting, camera perspective, and background.`,
-            },
-          ],
-        },
-      ],
-      tools: {
-        image_generation: openai.tools.imageGeneration({
-          model: IMAGE_GENERATION_MODEL,
+      },
+      providerOptions: {
+        openai: {
           quality: "high",
           outputFormat: "png",
-          size: "auto",
-        }),
+        },
       },
-      toolChoice: { type: "tool", toolName: "image_generation" },
     })
 
-    for (const toolResult of result.staticToolResults) {
-      if (toolResult.toolName === "image_generation") {
-        const base64 = (toolResult.output as { result: string }).result
-        return Response.json({ image: `data:image/png;base64,${base64}` })
-      }
-    }
-
-    return Response.json(
-      { error: "画像の生成に失敗しました。もう一度お試しください。" },
-      { status: 500 },
-    )
+    return Response.json({ image: `data:${result.image.mediaType};base64,${result.image.base64}` })
   } catch (error) {
     console.error("[v0] Transform error:", error)
     return Response.json(

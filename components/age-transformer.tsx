@@ -372,7 +372,7 @@ export function AgeTransformer() {
           ステップ 3：変換する
         </h2>
         <p className="mb-4 text-muted-foreground text-sm leading-relaxed">
-          GPT Image 2 が顔の特徴を保ったまま、選択した世代の年齢にそろえます。
+          AIが顔の特徴を保ったまま、選択した世代の年齢にそろえます。
         </p>
 
         <button
