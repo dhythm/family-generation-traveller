@@ -15,6 +15,13 @@ type UploadedPhoto = {
   role: FamilyRole | null
 }
 
+type TransformedPhoto = {
+  image: string
+  role: FamilyRole
+  originalIndex: number
+  transformed: boolean
+}
+
 const MAX_PHOTOS = 6
 
 const ROLE_OPTIONS: {
@@ -92,7 +99,7 @@ async function resizeImage(file: File, maxSize = 1536): Promise<string> {
 export function AgeTransformer() {
   const [photos, setPhotos] = useState<UploadedPhoto[]>([])
   const [mode, setMode] = useState<Mode | null>(null)
-  const [resultImage, setResultImage] = useState<string | null>(null)
+  const [resultImages, setResultImages] = useState<TransformedPhoto[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
@@ -122,7 +129,7 @@ export function AgeTransformer() {
     if (imageFiles.length === 0) return
 
     setError(null)
-    setResultImage(null)
+    setResultImages([])
 
     const remainingSlots = MAX_PHOTOS - photos.length
     if (remainingSlots <= 0) {
@@ -163,7 +170,7 @@ export function AgeTransformer() {
     }
 
     setError(null)
-    setResultImage(null)
+    setResultImages([])
     setPhotos((currentPhotos) =>
       currentPhotos.map((photo) => (photo.id === photoId ? { ...photo, role } : photo)),
     )
@@ -171,7 +178,7 @@ export function AgeTransformer() {
 
   const removePhoto = (photoId: string) => {
     setError(null)
-    setResultImage(null)
+    setResultImages([])
     setPhotos((currentPhotos) => currentPhotos.filter((photo) => photo.id !== photoId))
   }
 
@@ -179,18 +186,18 @@ export function AgeTransformer() {
     if (!canTransform || !mode) return
     setLoading(true)
     setError(null)
-    setResultImage(null)
+    setResultImages([])
     try {
       const res = await fetch("/api/transform", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ photos: classifiedPhotos, mode }),
       })
-      const data = (await res.json()) as { image?: string; error?: string }
-      if (!res.ok || !data.image) {
+      const data = (await res.json()) as { images?: TransformedPhoto[]; error?: string }
+      if (!res.ok || !data.images?.length) {
         throw new Error(data.error || "変換に失敗しました。")
       }
-      setResultImage(data.image)
+      setResultImages(data.images)
     } catch (e) {
       setError(e instanceof Error ? e.message : "変換に失敗しました。もう一度お試しください。")
     } finally {
@@ -201,7 +208,7 @@ export function AgeTransformer() {
   const handleReset = () => {
     setPhotos([])
     setMode(null)
-    setResultImage(null)
+    setResultImages([])
     setError(null)
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
@@ -384,7 +391,7 @@ export function AgeTransformer() {
           {loading ? (
             <>
               <Loader2 className="size-5 animate-spin" aria-hidden="true" />
-              変換中…（1〜2分かかります）
+              写真ごとに変換中…
             </>
           ) : (
             <>
@@ -400,25 +407,36 @@ export function AgeTransformer() {
           </p>
         )}
 
-        {resultImage && (
+        {resultImages.length > 0 && (
           <div className="mt-6 flex flex-col items-start gap-3">
-            <div className="rounded-lg border-2 border-foreground bg-card p-3">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={resultImage || "/placeholder.svg"}
-                alt="年齢変換された家族写真"
-                className="max-h-[32rem] w-auto rounded-md"
-              />
+            <div className="grid w-full gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {resultImages.map((result) => (
+                <div key={result.originalIndex} className="rounded-lg border-2 border-foreground bg-card p-3">
+                  <div className="overflow-hidden rounded-md border border-foreground/20 bg-secondary">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={result.image}
+                      alt={`${result.originalIndex + 1}枚目の年齢変換結果`}
+                      className="aspect-square w-full object-cover"
+                    />
+                  </div>
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground text-xs">
+                      {ROLE_LABELS[result.role]} / {result.transformed ? "変換済み" : "基準写真"}
+                    </span>
+                    <a
+                      href={result.image}
+                      download={`family-age-transformed-${result.originalIndex + 1}.png`}
+                      className="inline-flex items-center gap-1 rounded-md bg-foreground px-3 py-1.5 font-medium text-background text-xs transition-opacity hover:opacity-90"
+                    >
+                      <Download className="size-3.5" aria-hidden="true" />
+                      保存
+                    </a>
+                  </div>
+                </div>
+              ))}
             </div>
             <div className="flex flex-wrap gap-3">
-              <a
-                href={resultImage}
-                download="family-age-transformed.png"
-                className="inline-flex items-center gap-2 rounded-md bg-foreground px-5 py-2.5 font-medium text-background text-sm transition-opacity hover:opacity-90"
-              >
-                <Download className="size-4" aria-hidden="true" />
-                画像をダウンロード
-              </a>
               <button
                 type="button"
                 onClick={handleReset}

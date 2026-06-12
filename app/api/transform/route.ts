@@ -11,6 +11,13 @@ type UploadedPhoto = {
   role: FamilyRole
 }
 
+type TransformedPhoto = {
+  image: string
+  role: FamilyRole
+  originalIndex: number
+  transformed: boolean
+}
+
 const MAX_PHOTOS = 6
 const ROLE_LIMITS: Record<FamilyRole, number> = {
   child: 3,
@@ -28,11 +35,11 @@ const IMAGE_GENERATION_MODEL = "gpt-image-2"
 
 const MODE_PROMPTS: Record<Mode, string> = {
   child:
-    "Use the child-role reference images as the target-age references. Infer the target apparent age from those images. Keep child-role people at their current apparent age. Transform only the self-role and parent-role people to match the apparent age of the child-role references.",
+    "Use the child-role reference image or images only as target-age references. Infer the target apparent age from those reference images. Transform the person in the source photo to match that apparent age.",
   self:
-    "Use the self-role reference image as the target-age reference. Infer the target apparent age from that image. Keep the self-role person at their current apparent age. Transform only the child-role and parent-role people to match the apparent age of the self-role reference.",
+    "Use the self-role reference image only as the target-age reference. Infer the target apparent age from that reference image. Transform the person in the source photo to match that apparent age.",
   parent:
-    "Use the parent-role reference images as the target-age references. Infer the target apparent age from those images. Keep parent-role people at their current apparent age. Transform only the self-role and child-role people to match the apparent age of the parent-role references.",
+    "Use the parent-role reference image or images only as target-age references. Infer the target apparent age from those reference images. Transform the person in the source photo to match that apparent age.",
 }
 
 function isFamilyRole(role: unknown): role is FamilyRole {
@@ -96,40 +103,51 @@ export async function POST(req: Request) {
       return Response.json({ error: targetRoleError }, { status: 400 })
     }
 
-    const transformationGuide = photos
-      .map((photo, index) => {
-        const action =
-          photo.role === mode
-            ? `use this ${ROLE_LABELS[photo.role]} person as a target-age reference and keep their apparent age unchanged`
-            : `transform this ${ROLE_LABELS[photo.role]} person to match the apparent age inferred from the ${ROLE_LABELS[mode]} target-age reference images`
-        return `Reference image ${index + 1}: ${action}.`
-      })
-      .join("\n")
+    const targetPhotos = photos.filter((photo) => photo.role === mode)
+    const transformedPhotos = await Promise.all(
+      photos.map(async (photo, index): Promise<TransformedPhoto> => {
+        if (photo.role === mode) {
+          return {
+            image: photo.image,
+            role: photo.role,
+            originalIndex: index,
+            transformed: false,
+          }
+        }
 
-    const result = await generateImage({
-      model: openai.image(IMAGE_GENERATION_MODEL),
-      prompt: {
-        images: photos.map((photo) => photo.image),
-        text: `Create one cohesive photorealistic family portrait using all uploaded references.
+        const result = await generateImage({
+          model: openai.image(IMAGE_GENERATION_MODEL),
+          prompt: {
+            images: [photo.image, ...targetPhotos.map((targetPhoto) => targetPhoto.image)],
+            text: `Edit only the person in source image 1. Do not create a group photo. Do not combine people from multiple references into one scene.
 
 ${MODE_PROMPTS[mode]}
 
-Do not use a fixed numeric age range. Determine the target apparent age only from the target-role reference image or images supplied above.
+Source image 1 role: ${ROLE_LABELS[photo.role]}.
+Reference images 2 and later role: ${ROLE_LABELS[mode]} target-age references.
 
-Per-person instructions:
-${transformationGuide}
+Do not use a fixed numeric age range. Determine the target apparent age only from the target-role reference image or images.
 
-Preserve each person's unique facial features, identity, hairstyle color, skin tone, glasses if any, and expression so each person remains recognizable. Do not omit anyone. Arrange them naturally as a warm family photo with consistent lighting, camera perspective, and background.`,
-      },
-      providerOptions: {
-        openai: {
-          quality: "high",
-          outputFormat: "png",
-        },
-      },
-    })
+Preserve the source photo's composition, pose, crop, background, lighting, clothing style, expression, facial identity, hairstyle color, skin tone, and glasses if any. Output one edited image corresponding to source image 1 only.`,
+          },
+          providerOptions: {
+            openai: {
+              quality: "high",
+              outputFormat: "png",
+            },
+          },
+        })
 
-    return Response.json({ image: `data:${result.image.mediaType};base64,${result.image.base64}` })
+        return {
+          image: `data:${result.image.mediaType};base64,${result.image.base64}`,
+          role: photo.role,
+          originalIndex: index,
+          transformed: true,
+        }
+      }),
+    )
+
+    return Response.json({ images: transformedPhotos })
   } catch (error) {
     console.error("[v0] Transform error:", error)
     return Response.json(
