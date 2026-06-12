@@ -9,7 +9,7 @@ export default function Home() {
           家族みんなで、同じ年齢になってみよう
         </h1>
         <p className="mt-4 max-w-xl text-muted-foreground leading-relaxed">
-          親・自分・子供の3世代写真をアップロードすると、AIが写真の全員を子供・大人・親の同じ年齢に変換します。
+          親・自分・子供の写真をアップロードして分類すると、AIが全員を子供・大人・親の同じ年齢に変換します。
         </p>
       </header>
 

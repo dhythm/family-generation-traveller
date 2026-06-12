@@ -1,11 +1,32 @@
 "use client"
 
-import { Baby, Download, Glasses, ImageIcon, Loader2, RotateCcw, Sparkles, User } from "lucide-react"
+import { Baby, Download, Glasses, ImageIcon, Loader2, RotateCcw, Sparkles, Trash2, User } from "lucide-react"
 import { useCallback, useRef, useState } from "react"
 
 import { cn } from "@/lib/utils"
 
 type Mode = "child" | "self" | "parent"
+type FamilyRole = "child" | "self" | "parent"
+
+type UploadedPhoto = {
+  id: string
+  image: string
+  name: string
+  role: FamilyRole | null
+}
+
+const MAX_PHOTOS = 6
+
+const ROLE_OPTIONS: {
+  id: FamilyRole
+  label: string
+  limit: number
+  icon: typeof Baby
+}[] = [
+  { id: "child", label: "子ども", limit: 3, icon: Baby },
+  { id: "self", label: "自分", limit: 1, icon: User },
+  { id: "parent", label: "親", limit: 2, icon: Glasses },
+]
 
 const MODES: { id: Mode; label: string; description: string; icon: typeof Baby }[] = [
   {
@@ -27,6 +48,12 @@ const MODES: { id: Mode; label: string; description: string; icon: typeof Baby }
     icon: Glasses,
   },
 ]
+
+const ROLE_LABELS: Record<FamilyRole, string> = {
+  child: "子ども",
+  self: "自分",
+  parent: "親",
+}
 
 const MODE_LABELS: Record<Mode, string> = {
   child: "全員を子供に変換",
@@ -63,7 +90,7 @@ async function resizeImage(file: File, maxSize = 1536): Promise<string> {
 }
 
 export function AgeTransformer() {
-  const [sourceImage, setSourceImage] = useState<string | null>(null)
+  const [photos, setPhotos] = useState<UploadedPhoto[]>([])
   const [mode, setMode] = useState<Mode | null>(null)
   const [resultImage, setResultImage] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -71,23 +98,84 @@ export function AgeTransformer() {
   const [dragging, setDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const handleFile = useCallback(async (file: File) => {
-    if (!file.type.startsWith("image/")) {
-      setError("画像ファイルを選択してください。")
+  const roleCounts = ROLE_OPTIONS.reduce(
+    (counts, role) => ({
+      ...counts,
+      [role.id]: photos.filter((photo) => photo.role === role.id).length,
+    }),
+    {} as Record<FamilyRole, number>,
+  )
+  const classifiedPhotos = photos.filter(
+    (photo): photo is UploadedPhoto & { role: FamilyRole } => photo.role !== null,
+  )
+  const hasUnclassifiedPhoto = photos.some((photo) => photo.role === null)
+  const canTransform = classifiedPhotos.length > 0 && !hasUnclassifiedPhoto && mode !== null
+
+  const handleFiles = useCallback(async (fileList: FileList | File[]) => {
+    const files = Array.from(fileList)
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"))
+    if (imageFiles.length !== files.length) {
+      setError("JPG / PNG / WebP などの画像ファイルを選択してください。")
       return
     }
+    if (imageFiles.length === 0) return
+
     setError(null)
     setResultImage(null)
+
+    const remainingSlots = MAX_PHOTOS - photos.length
+    if (remainingSlots <= 0) {
+      setError("アップロードできる写真は最大6枚です。")
+      return
+    }
+
+    const filesToAdd = imageFiles.slice(0, remainingSlots)
+    if (imageFiles.length > remainingSlots) {
+      setError(`アップロードできる写真は最大6枚です。${remainingSlots}枚だけ追加しました。`)
+    }
+
     try {
-      const resized = await resizeImage(file)
-      setSourceImage(resized)
+      const resizedPhotos = await Promise.all(
+        filesToAdd.map(async (file) => ({
+          id: `${file.name}-${file.lastModified}-${crypto.randomUUID()}`,
+          image: await resizeImage(file),
+          name: file.name,
+          role: null,
+        })),
+      )
+      setPhotos((currentPhotos) => [...currentPhotos, ...resizedPhotos])
     } catch {
       setError("画像の読み込みに失敗しました。別のファイルをお試しください。")
     }
-  }, [])
+  }, [photos.length])
+
+  const assignRole = (photoId: string, role: FamilyRole) => {
+    const currentPhoto = photos.find((photo) => photo.id === photoId)
+    if (!currentPhoto) return
+
+    const currentCount = roleCounts[role]
+    const selectingSameRole = currentPhoto.role === role
+    const roleLimit = ROLE_OPTIONS.find((option) => option.id === role)?.limit ?? 0
+    if (!selectingSameRole && currentCount >= roleLimit) {
+      setError(`${ROLE_LABELS[role]}は最大${roleLimit}名までです。`)
+      return
+    }
+
+    setError(null)
+    setResultImage(null)
+    setPhotos((currentPhotos) =>
+      currentPhotos.map((photo) => (photo.id === photoId ? { ...photo, role } : photo)),
+    )
+  }
+
+  const removePhoto = (photoId: string) => {
+    setError(null)
+    setResultImage(null)
+    setPhotos((currentPhotos) => currentPhotos.filter((photo) => photo.id !== photoId))
+  }
 
   const handleTransform = async () => {
-    if (!sourceImage || !mode) return
+    if (!canTransform || !mode) return
     setLoading(true)
     setError(null)
     setResultImage(null)
@@ -95,7 +183,7 @@ export function AgeTransformer() {
       const res = await fetch("/api/transform", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: sourceImage, mode }),
+        body: JSON.stringify({ photos: classifiedPhotos, mode }),
       })
       const data = (await res.json()) as { image?: string; error?: string }
       if (!res.ok || !data.image) {
@@ -110,7 +198,7 @@ export function AgeTransformer() {
   }
 
   const handleReset = () => {
-    setSourceImage(null)
+    setPhotos([])
     setMode(null)
     setResultImage(null)
     setError(null)
@@ -125,68 +213,114 @@ export function AgeTransformer() {
           ステップ 1：写真をアップロード
         </h2>
         <p className="mb-4 text-muted-foreground text-sm leading-relaxed">
-          親・自分・子供の3世代が写った写真をアップロードしてください。
+          親は最大2名、自分は1名、子どもは最大3名まで。合計6枚までアップロードできます。
         </p>
 
-        {sourceImage ? (
-          <div className="flex flex-col items-start gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={sourceImage || "/placeholder.svg"}
-              alt="アップロードされた3世代の家族写真"
-              className="max-h-96 w-auto rounded-lg border-2 border-foreground"
-            />
-            <button
-              type="button"
-              onClick={handleReset}
-              className="inline-flex items-center gap-2 rounded-md border-2 border-foreground bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-secondary"
-            >
-              <RotateCcw className="size-4" aria-hidden="true" />
-              写真を変更する
-            </button>
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="クリックまたはドラッグ＆ドロップで写真をアップロード"
+          onClick={() => fileInputRef.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") fileInputRef.current?.click()
+          }}
+          onDragOver={(e) => {
+            e.preventDefault()
+            setDragging(true)
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault()
+            setDragging(false)
+            void handleFiles(e.dataTransfer.files)
+          }}
+          className={cn(
+            "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-lg border-2 border-foreground border-dashed bg-card px-6 py-12 text-center transition-colors",
+            dragging ? "bg-accent" : "hover:bg-secondary",
+            photos.length >= MAX_PHOTOS && "cursor-not-allowed opacity-60",
+          )}
+        >
+          <ImageIcon className="size-10 text-primary" aria-hidden="true" />
+          <div>
+            <p className="font-bold">クリックして写真を選択</p>
+            <p className="mt-1 text-muted-foreground text-sm">
+              またはドラッグ＆ドロップ（JPG / PNG / WebP、最大{MAX_PHOTOS}枚）
+            </p>
           </div>
-        ) : (
-          <div
-            role="button"
-            tabIndex={0}
-            aria-label="クリックまたはドラッグ＆ドロップで写真をアップロード"
-            onClick={() => fileInputRef.current?.click()}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") fileInputRef.current?.click()
-            }}
-            onDragOver={(e) => {
-              e.preventDefault()
-              setDragging(true)
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(e) => {
-              e.preventDefault()
-              setDragging(false)
-              const file = e.dataTransfer.files?.[0]
-              if (file) handleFile(file)
-            }}
-            className={cn(
-              "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-lg border-2 border-foreground border-dashed bg-card px-6 py-14 text-center transition-colors",
-              dragging ? "bg-accent" : "hover:bg-secondary",
-            )}
-          >
-            <ImageIcon className="size-10 text-primary" aria-hidden="true" />
-            <div>
-              <p className="font-bold">クリックして写真を選択</p>
-              <p className="mt-1 text-muted-foreground text-sm">またはドラッグ＆ドロップ（JPG / PNG / WebP）</p>
-            </div>
-          </div>
-        )}
+        </div>
         <input
           ref={fileInputRef}
           type="file"
           accept="image/*"
+          multiple
           className="sr-only"
           onChange={(e) => {
-            const file = e.target.files?.[0]
-            if (file) handleFile(file)
+            const files = e.target.files
+            if (files) void handleFiles(files)
+            e.currentTarget.value = ""
           }}
         />
+
+        {photos.length > 0 && (
+          <div className="mt-5 space-y-4">
+            <div className="flex flex-wrap gap-2 text-xs">
+              {ROLE_OPTIONS.map((role) => (
+                <span key={role.id} className="rounded-full border border-foreground/25 px-3 py-1 font-medium">
+                  {role.label} {roleCounts[role.id]} / {role.limit}
+                </span>
+              ))}
+              <span className="rounded-full border border-foreground/25 px-3 py-1 font-medium">
+                合計 {photos.length} / {MAX_PHOTOS}
+              </span>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {photos.map((photo, index) => (
+                <div key={photo.id} className="rounded-lg border-2 border-foreground bg-card p-3">
+                  <div className="relative overflow-hidden rounded-md border border-foreground/20 bg-secondary">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={photo.image} alt={`${index + 1}枚目のアップロード写真`} className="aspect-square w-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removePhoto(photo.id)}
+                      className="absolute right-2 top-2 inline-flex size-8 items-center justify-center rounded-full bg-background/90 text-foreground shadow-sm transition-colors hover:bg-background"
+                      aria-label={`${index + 1}枚目の写真を削除`}
+                    >
+                      <Trash2 className="size-4" aria-hidden="true" />
+                    </button>
+                  </div>
+                  <p className="mt-2 truncate text-xs text-muted-foreground">{photo.name}</p>
+                  <div className="mt-3 grid grid-cols-3 gap-1" role="radiogroup" aria-label={`${index + 1}枚目の分類`}>
+                    {ROLE_OPTIONS.map((role) => {
+                      const Icon = role.icon
+                      const selected = photo.role === role.id
+                      const disabled = !selected && roleCounts[role.id] >= role.limit
+                      return (
+                        <button
+                          key={role.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          disabled={disabled || loading}
+                          onClick={() => assignRole(photo.id, role.id)}
+                          className={cn(
+                            "flex min-h-16 flex-col items-center justify-center gap-1 rounded-md border px-2 py-2 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-35",
+                            selected
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "border-foreground/30 bg-background hover:bg-secondary",
+                          )}
+                        >
+                          <Icon className="size-4" aria-hidden="true" />
+                          {role.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Step 2: Mode */}
@@ -206,7 +340,7 @@ export function AgeTransformer() {
                 type="button"
                 role="radio"
                 aria-checked={selected}
-                disabled={!sourceImage || loading}
+                disabled={photos.length === 0 || hasUnclassifiedPhoto || loading}
                 onClick={() => setMode(m.id)}
                 className={cn(
                   "flex flex-col items-center gap-2 rounded-lg border-2 px-4 py-6 text-center transition-colors disabled:cursor-not-allowed disabled:opacity-40",
@@ -240,7 +374,7 @@ export function AgeTransformer() {
         <button
           type="button"
           onClick={handleTransform}
-          disabled={!sourceImage || !mode || loading}
+          disabled={!canTransform || loading}
           className="inline-flex items-center gap-2 rounded-md bg-primary px-8 py-3 font-bold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {loading ? (
