@@ -234,7 +234,7 @@ export function AgeTransformer() {
           ステップ 3：変換する
         </h2>
         <p className="mb-4 text-muted-foreground text-sm leading-relaxed">
-          GPT Image 2 が顔の特徴を保ったまま、全員の年齢を変換します。
+          顔の特徴を保ったまま、全員の年齢を変換します。
         </p>
 
         <button
