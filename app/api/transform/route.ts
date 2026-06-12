@@ -24,10 +24,15 @@ const ROLE_LABELS: Record<FamilyRole, string> = {
   parent: "parent / senior generation",
 }
 
+const IMAGE_GENERATION_MODEL = "gpt-image-2"
+
 const MODE_PROMPTS: Record<Mode, string> = {
-  child: `Create one cohesive photorealistic family portrait where EVERY referenced person appears as a young child, approximately 5 to 7 years old. Transform each person's face and body to look like a natural child version of themselves, preserving their unique facial features, identity, hairstyle color, skin tone, glasses if any, and expressions so each person is still recognizable. Keep each person's generational relationship clear while making everyone the same child age.`,
-  self: `Create one cohesive photorealistic family portrait where EVERY referenced person appears as an adult in their mid-30s. Transform each person's face and body to look like a natural mid-30s adult version of themselves, preserving their unique facial features, identity, hairstyle color, skin tone, glasses if any, and expressions so each person is still recognizable. Keep each person's generational relationship clear while making everyone the same adult age.`,
-  parent: `Create one cohesive photorealistic family portrait where EVERY referenced person appears as a senior, approximately 65 to 70 years old. Transform each person's face and body to look like a natural senior version of themselves with age-appropriate features, preserving their unique facial features, identity, skin tone, glasses if any, and expressions so each person is still recognizable. Keep each person's generational relationship clear while making everyone the same senior age.`,
+  child:
+    "Use the child-role reference images as the target-age references. Infer the target apparent age from those images. Keep child-role people at their current apparent age. Transform only the self-role and parent-role people to match the apparent age of the child-role references.",
+  self:
+    "Use the self-role reference image as the target-age reference. Infer the target apparent age from that image. Keep the self-role person at their current apparent age. Transform only the child-role and parent-role people to match the apparent age of the self-role reference.",
+  parent:
+    "Use the parent-role reference images as the target-age references. Infer the target apparent age from those images. Keep parent-role people at their current apparent age. Transform only the self-role and child-role people to match the apparent age of the parent-role references.",
 }
 
 function isFamilyRole(role: unknown): role is FamilyRole {
@@ -52,8 +57,23 @@ function validatePhotos(photos: UploadedPhoto[]) {
   return null
 }
 
+function validateTargetRole(photos: UploadedPhoto[], mode: Mode) {
+  if (!photos.some((photo) => photo.role === mode)) {
+    return "基準となる世代の写真を1枚以上分類してください。"
+  }
+
+  return null
+}
+
 export async function POST(req: Request) {
   try {
+    if (!process.env.OPENAI_API_KEY) {
+      return Response.json(
+        { error: "OPENAI_API_KEY 環境変数を設定してください。" },
+        { status: 500 },
+      )
+    }
+
     const { photos, mode } = (await req.json()) as {
       photos?: UploadedPhoto[]
       mode?: Mode
@@ -71,8 +91,19 @@ export async function POST(req: Request) {
       return Response.json({ error: photoError }, { status: 400 })
     }
 
-    const roleGuide = photos
-      .map((photo, index) => `Reference image ${index + 1}: ${ROLE_LABELS[photo.role]}`)
+    const targetRoleError = validateTargetRole(photos, mode)
+    if (targetRoleError) {
+      return Response.json({ error: targetRoleError }, { status: 400 })
+    }
+
+    const transformationGuide = photos
+      .map((photo, index) => {
+        const action =
+          photo.role === mode
+            ? `use this ${ROLE_LABELS[photo.role]} person as a target-age reference and keep their apparent age unchanged`
+            : `transform this ${ROLE_LABELS[photo.role]} person to match the apparent age inferred from the ${ROLE_LABELS[mode]} target-age reference images`
+        return `Reference image ${index + 1}: ${action}.`
+      })
       .join("\n")
 
     const result = await generateText({
@@ -87,14 +118,23 @@ export async function POST(req: Request) {
             ]),
             {
               type: "text",
-              text: `${roleGuide}\n\n${MODE_PROMPTS[mode]}\n\nUse all uploaded references in the final portrait. Do not omit anyone. Arrange them naturally as a warm family photo with consistent lighting, camera perspective, and background.`,
+              text: `Create one cohesive photorealistic family portrait using all uploaded references.
+
+${MODE_PROMPTS[mode]}
+
+Do not use a fixed numeric age range. Determine the target apparent age only from the target-role reference image or images supplied above.
+
+Per-person instructions:
+${transformationGuide}
+
+Preserve each person's unique facial features, identity, hairstyle color, skin tone, glasses if any, and expression so each person remains recognizable. Do not omit anyone. Arrange them naturally as a warm family photo with consistent lighting, camera perspective, and background.`,
             },
           ],
         },
       ],
       tools: {
         image_generation: openai.tools.imageGeneration({
-          model: "gpt-image-2",
+          model: IMAGE_GENERATION_MODEL,
           quality: "high",
           outputFormat: "png",
           size: "auto",

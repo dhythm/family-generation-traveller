@@ -31,20 +31,20 @@ const ROLE_OPTIONS: {
 const MODES: { id: Mode; label: string; description: string; icon: typeof Baby }[] = [
   {
     id: "child",
-    label: "全員を子供に",
-    description: "家族みんなが5〜7歳の子供時代に",
+    label: "子どもの年齢にそろえる",
+    description: "自分と親を子どもの写真の年齢に",
     icon: Baby,
   },
   {
     id: "self",
-    label: "全員を自分の年齢に",
-    description: "家族みんなが30代の大人に",
+    label: "自分の年齢にそろえる",
+    description: "子どもと親を自分の写真の年齢に",
     icon: User,
   },
   {
     id: "parent",
-    label: "全員を親の年齢に",
-    description: "家族みんなが65〜70歳のシニアに",
+    label: "親の年齢にそろえる",
+    description: "自分と子どもを親の写真の年齢に",
     icon: Glasses,
   },
 ]
@@ -56,9 +56,9 @@ const ROLE_LABELS: Record<FamilyRole, string> = {
 }
 
 const MODE_LABELS: Record<Mode, string> = {
-  child: "全員を子供に変換",
-  self: "全員を自分の年齢に変換",
-  parent: "全員を親の年齢に変換",
+  child: "子どもの年齢にそろえる",
+  self: "自分の年齢にそろえる",
+  parent: "親の年齢にそろえる",
 }
 
 async function resizeImage(file: File, maxSize = 1536): Promise<string> {
@@ -109,7 +109,8 @@ export function AgeTransformer() {
     (photo): photo is UploadedPhoto & { role: FamilyRole } => photo.role !== null,
   )
   const hasUnclassifiedPhoto = photos.some((photo) => photo.role === null)
-  const canTransform = classifiedPhotos.length > 0 && !hasUnclassifiedPhoto && mode !== null
+  const hasTargetRolePhoto = mode !== null && roleCounts[mode] > 0
+  const canTransform = classifiedPhotos.length > 0 && !hasUnclassifiedPhoto && mode !== null && hasTargetRolePhoto
 
   const handleFiles = useCallback(async (fileList: FileList | File[]) => {
     const files = Array.from(fileList)
@@ -328,19 +329,22 @@ export function AgeTransformer() {
         <h2 id="step2-heading" className="mb-1 font-bold text-lg uppercase tracking-wide">
           ステップ 2：変換モードを選択
         </h2>
-        <p className="mb-4 text-muted-foreground text-sm leading-relaxed">写真の全員をどの年齢にしますか？</p>
+        <p className="mb-4 text-muted-foreground text-sm leading-relaxed">
+          どの世代の年齢にそろえますか？選んだ世代はそのまま、他の世代だけ変換します。
+        </p>
 
         <div className="grid gap-4 sm:grid-cols-3" role="radiogroup" aria-label="変換モード">
           {MODES.map((m) => {
             const Icon = m.icon
             const selected = mode === m.id
+            const disabled = photos.length === 0 || hasUnclassifiedPhoto || roleCounts[m.id] === 0 || loading
             return (
               <button
                 key={m.id}
                 type="button"
                 role="radio"
                 aria-checked={selected}
-                disabled={photos.length === 0 || hasUnclassifiedPhoto || loading}
+                disabled={disabled}
                 onClick={() => setMode(m.id)}
                 className={cn(
                   "flex flex-col items-center gap-2 rounded-lg border-2 px-4 py-6 text-center transition-colors disabled:cursor-not-allowed disabled:opacity-40",
@@ -368,7 +372,7 @@ export function AgeTransformer() {
           ステップ 3：変換する
         </h2>
         <p className="mb-4 text-muted-foreground text-sm leading-relaxed">
-          顔の特徴を保ったまま、全員の年齢を変換します。
+          GPT Image 2 が顔の特徴を保ったまま、選択した世代の年齢にそろえます。
         </p>
 
         <button
