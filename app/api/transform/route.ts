@@ -35,11 +35,11 @@ const IMAGE_GENERATION_MODEL = "gpt-image-2"
 
 const MODE_PROMPTS: Record<Mode, string> = {
   child:
-    "Use the child-role reference image or images only as target-age references. Infer the target apparent age from those reference images. Transform the person in the source photo to match that apparent age.",
+    "Use the child-role reference image or images only as target-age references. Infer the target apparent age from those reference images. Transform the person in the source photo to match that apparent age. The transformed person must look like a natural child, with age-appropriate natural hair, skin texture, and clothing. Do not keep age-related gray, white, or silver hair from the source photo.",
   self:
-    "Use the self-role reference image only as the target-age reference. Infer the target apparent age from that reference image. Transform the person in the source photo to match that apparent age.",
+    "Use the self-role reference image only as the target-age reference. Infer the target apparent age from that reference image. Transform the person in the source photo to match that apparent age, with hair, skin texture, and clothing that are natural for the self-role reference age.",
   parent:
-    "Use the parent-role reference image or images only as target-age references. Infer the target apparent age from those reference images. Transform the person in the source photo to match that apparent age.",
+    "Use the parent-role reference image or images only as target-age references. Infer the target apparent age from those reference images. Transform the person in the source photo to match that apparent age, with hair, skin texture, and clothing that are natural for the parent-role reference age. Natural gray, white, or silver hair and other age-appropriate senior features are allowed when they match the parent-role references.",
 }
 
 function isFamilyRole(role: unknown): role is FamilyRole {
@@ -128,7 +128,7 @@ Reference images 2 and later role: ${ROLE_LABELS[mode]} target-age references.
 
 Do not use a fixed numeric age range. Determine the target apparent age only from the target-role reference image or images.
 
-Preserve the source photo's composition, pose, crop, background, lighting, clothing style, expression, facial identity, hairstyle color, skin tone, and glasses if any. Output one edited image corresponding to source image 1 only.`,
+Preserve the source photo's composition, pose, crop, background, lighting, expression, skin tone, and glasses if any. Preserve the person's identity primarily through the shape and distinctive details of the eyes, nose, mouth, smile, jawline, and the area around the mouth. Recreate hair, skin sheen/texture, and clothing so they look natural for the inferred target age, rather than preserving age-inconsistent hair, skin, or clothing artifacts from the source photo. Output one edited image corresponding to source image 1 only.`,
           },
           providerOptions: {
             openai: {
